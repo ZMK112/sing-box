@@ -45,6 +45,22 @@
 
 安装及使用：https://233boy.com/sing-box/sing-box-script/
 
+# 一键安装
+
+使用 `curl`：
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/ZMK112/sing-box/main/install.sh | bash
+```
+
+使用 `wget`：
+
+```bash
+wget -qO- https://raw.githubusercontent.com/ZMK112/sing-box/main/install.sh | bash
+```
+
+默认安装会使用本仓库发布的审核资产，并校验 `SHA256SUMS`。
+
 # 审核安装源
 
 默认安装源已切换为本仓库发布的审核资产：`ZMK112/sing-box` 的固定 release tag。
