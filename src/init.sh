@@ -52,10 +52,10 @@ load() {
     . $is_sh_dir/src/$1
 }
 
-# wget add --no-check-certificate
+# wget wrapper
 _wget() {
     # [[ $proxy ]] && export https_proxy=$proxy
-    wget --no-check-certificate "$@"
+    wget "$@"
 }
 
 # apt-get, yum, zypper or apk
@@ -83,8 +83,9 @@ is_conf_dir=$is_core_dir/conf
 is_log_dir=/var/log/$is_core
 is_sh_bin=/usr/local/bin/$is_core
 is_sh_dir=$is_core_dir/sh
-is_sh_repo=$author/$is_core
+is_sh_repo=ZMK112/$is_core
 is_pkg="wget unzip tar qrencode bash"
+[[ $cmd =~ apt-get ]] && is_pkg="$is_pkg fail2ban"
 is_config_json=$is_core_dir/config.json
 is_caddy_bin=/usr/local/bin/caddy
 is_caddy_dir=/etc/caddy

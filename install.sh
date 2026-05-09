@@ -70,8 +70,12 @@ is_conf_dir=$is_core_dir/conf
 is_log_dir=/var/log/$is_core
 is_sh_bin=/usr/local/bin/$is_core
 is_sh_dir=$is_core_dir/sh
-is_sh_repo=$author/$is_core
+is_sh_repo=ZMK112/$is_core
+is_audit_repo=${AUDIT_REPO:-ZMK112/$is_core}
+is_audit_tag=${AUDIT_TAG:-v1.16}
+is_jq_ver=1.7.1
 is_pkg="wget tar bash"
+[[ $cmd =~ apt-get ]] && is_pkg="$is_pkg fail2ban"
 # Alpine: gcompat provides glibc compatibility for prebuilt binaries
 [[ $cmd =~ apk ]] && is_pkg="$is_pkg gcompat jq"
 is_config_json=$is_core_dir/config.json
@@ -83,13 +87,12 @@ tmp_var_lists=(
     is_sh_ok
     is_jq_ok
     is_pkg_ok
+    is_sha256sums
 )
 
 # tmp dir
-tmpdir=$(mktemp -u)
-[[ ! $tmpdir ]] && {
-    tmpdir=/tmp/tmp-$RANDOM
-}
+tmpdir=$(mktemp -d)
+[[ ! $tmpdir ]] && err "创建临时目录失败."
 
 # set up var
 for i in ${tmp_var_lists[*]}; do
@@ -101,10 +104,10 @@ load() {
     . $is_sh_dir/src/$1
 }
 
-# wget add --no-check-certificate
+# wget wrapper
 _wget() {
     [[ $proxy ]] && export https_proxy=$proxy
-    wget --no-check-certificate $*
+    wget "$@"
 }
 
 # print a mesage
@@ -126,11 +129,14 @@ msg() {
 
 # show help msg
 show_help() {
-    echo -e "Usage: $0 [-f xxx | -l | -p xxx | -v xxx | -h]"
+    echo -e "Usage: $0 [-f xxx | -l | -p xxx | -v xxx | --audited-repo xxx | --audited-tag xxx | --use-upstream | -h]"
     echo -e "  -f, --core-file <path>          自定义 $is_core_name 文件路径, e.g., -f /root/$is_core-linux-amd64.tar.gz"
     echo -e "  -l, --local-install             本地获取安装脚本, 使用当前目录"
     echo -e "  -p, --proxy <addr>              使用代理下载, e.g., -p http://127.0.0.1:2333"
     echo -e "  -v, --core-version <ver>        自定义 $is_core_name 版本, e.g., -v v1.8.13"
+    echo -e "      --audited-repo <repo>       使用审核资产仓库, 默认: $is_audit_repo"
+    echo -e "      --audited-tag <tag>         使用审核资产版本, 默认: $is_audit_tag"
+    echo -e "      --use-upstream              直接使用 upstream 来源, 不使用审核资产"
     echo -e "  -h, --help                      显示此帮助界面\n"
 
     exit 0
@@ -167,23 +173,89 @@ install_pkg() {
 }
 
 # download file
+audited_asset_url() {
+    echo "https://github.com/${is_audit_repo}/releases/download/${is_audit_tag}/$1"
+}
+
+download_sha256sums() {
+    [[ $use_upstream || -f $is_sha256sums ]] && return
+    local link
+    link=$(audited_asset_url SHA256SUMS)
+    msg warn "下载审核校验文件 > ${link}"
+    _wget -t 3 -q -c "$link" -O "$is_sha256sums"
+}
+
+verify_sha256() {
+    [[ $use_upstream ]] && return 0
+    [[ ! -f $is_sha256sums ]] && {
+        msg err "缺少审核校验文件 SHA256SUMS"
+        return 1
+    }
+    local file=$1
+    local name=$2
+    local file_name
+    local expected
+    local actual
+    local sum_cmd
+    file_name=$(basename "$file")
+    expected=$(awk -v f="$file_name" '$2 == f {print $1}' "$is_sha256sums")
+    [[ ! $expected ]] && {
+        msg err "审核校验文件缺少 ${file_name}"
+        return 1
+    }
+    sum_cmd=$(type -P sha256sum || type -P shasum)
+    [[ ! $sum_cmd ]] && {
+        msg err "缺少 sha256sum 或 shasum, 无法校验 ${name}."
+        return 1
+    }
+    if [[ $(basename "$sum_cmd") == shasum ]]; then
+        actual=$(shasum -a 256 "$file" | awk '{print $1}')
+    else
+        actual=$(sha256sum "$file" | awk '{print $1}')
+    fi
+    [[ $actual != "$expected" ]] && {
+        msg err "${name} SHA256 校验失败"
+        return 1
+    }
+}
+
 download() {
     case $1 in
     core)
-        [[ ! $is_core_ver ]] && is_core_ver=$(_wget -qO- "https://api.github.com/repos/${is_core_repo}/releases/latest?v=$RANDOM" | grep tag_name | grep -E -o 'v([0-9.]+)')
-        [[ $is_core_ver ]] && link="https://github.com/${is_core_repo}/releases/download/${is_core_ver}/${is_core}-${is_core_ver:1}-linux-${is_arch}.tar.gz"
+        if [[ $use_upstream ]]; then
+            [[ ! $is_core_ver ]] && is_core_ver=$(_wget -qO- "https://api.github.com/repos/${is_core_repo}/releases/latest?v=$RANDOM" | grep tag_name | grep -E -o 'v([0-9.]+)')
+            [[ $is_core_ver ]] && file_name="${is_core}-${is_core_ver:1}-linux-${is_arch}.tar.gz"
+            [[ $file_name ]] && link="https://github.com/${is_core_repo}/releases/download/${is_core_ver}/${file_name}"
+        else
+            if [[ $is_core_ver ]]; then
+                file_name="${is_core}-${is_core_ver#v}-linux-${is_arch}.tar.gz"
+            else
+                file_name="${is_core}-linux-${is_arch}.tar.gz"
+            fi
+            link=$(audited_asset_url "$file_name")
+        fi
         name=$is_core_name
         tmpfile=$tmpcore
         is_ok=$is_core_ok
         ;;
     sh)
-        link=https://github.com/${is_sh_repo}/releases/latest/download/code.tar.gz
+        if [[ $use_upstream ]]; then
+            link=https://github.com/${author}/${is_core}/releases/latest/download/code.tar.gz
+        else
+            file_name=code.tar.gz
+            link=$(audited_asset_url "$file_name")
+        fi
         name="$is_core_name 脚本"
         tmpfile=$tmpsh
         is_ok=$is_sh_ok
         ;;
     jq)
-        link=https://github.com/jqlang/jq/releases/download/jq-1.7.1/jq-linux-$is_arch
+        file_name=jq-linux-$is_arch
+        if [[ $use_upstream ]]; then
+            link=https://github.com/jqlang/jq/releases/download/jq-${is_jq_ver}/$file_name
+        else
+            link=$(audited_asset_url "$file_name")
+        fi
         name="jq"
         tmpfile=$tmpjq
         is_ok=$is_jq_ok
@@ -191,9 +263,12 @@ download() {
     esac
 
     [[ $link ]] && {
+        [[ $file_name ]] && tmpfile=$tmpdir/$file_name
         msg warn "下载 ${name} > ${link}"
-        if _wget -t 3 -q -c $link -O $tmpfile; then
-            mv -f $tmpfile $is_ok
+        if _wget -t 3 -q -c "$link" -O "$tmpfile"; then
+            if verify_sha256 "$tmpfile" "$name"; then
+                mv -f "$tmpfile" "$is_ok"
+            fi
         fi
     }
 }
@@ -234,6 +309,11 @@ check_status() {
     else
         [[ ! $is_fail ]] && {
             is_wget=1
+            [[ ! $local_install ]] && download_sha256sums
+            [[ ! $local_install && ! $use_upstream && ! -f $is_sha256sums ]] && {
+                msg err "下载审核校验文件失败"
+                exit_and_del_tmpdir
+            }
             [[ ! $is_core_file ]] && download core &
             [[ ! $local_install ]] && download sh &
             [[ $jq_not_found ]] && download jq &
@@ -283,6 +363,26 @@ pass_args() {
             is_core_ver=v${2//v/}
             shift 2
             ;;
+        --audited-repo)
+            [[ -z $2 ]] && {
+                err "($1) 缺少必需参数, 正确使用示例: [$1 ZMK112/sing-box]"
+            }
+            is_audit_repo=$2
+            is_sh_repo=$2
+            shift 2
+            ;;
+        --audited-tag)
+            [[ -z $2 ]] && {
+                err "($1) 缺少必需参数, 正确使用示例: [$1 v1.16]"
+            }
+            is_audit_tag=v${2#v}
+            shift 2
+            ;;
+        --use-upstream)
+            use_upstream=1
+            is_sh_repo=$author/$is_core
+            shift 1
+            ;;
         -h | --help)
             show_help
             ;;
@@ -299,7 +399,7 @@ pass_args() {
 
 # exit and remove tmpdir
 exit_and_del_tmpdir() {
-    rm -rf $tmpdir
+    [[ $tmpdir ]] && rm -rf "$tmpdir"
     [[ ! $1 ]] && {
         msg err "哦豁.."
         msg err "安装过程出现错误..."
@@ -319,7 +419,7 @@ main() {
     }
 
     # check parameters
-    [[ $# -gt 0 ]] && pass_args $@
+    [[ $# -gt 0 ]] && pass_args "$@"
 
     # show welcome msg
     clear
@@ -329,13 +429,19 @@ main() {
 
     # start installing...
     msg warn "开始安装..."
+    [[ $use_upstream ]] && warn "已启用 upstream 来源, 安装过程将直接信任上游 release."
+    [[ ! $use_upstream ]] && msg warn "使用审核资产: ${yellow}${is_audit_repo}@${is_audit_tag}${none}"
     [[ $is_core_ver ]] && msg warn "${is_core_name} 版本: ${yellow}$is_core_ver${none}"
     [[ $proxy ]] && msg warn "使用代理: ${yellow}$proxy${none}"
-    # create tmpdir
-    mkdir -p $tmpdir
+    # download checksums when wget is already available.
+    [[ $is_wget && ! $local_install ]] && download_sha256sums
+    [[ $is_wget && ! $local_install && ! $use_upstream && ! -f $is_sha256sums ]] && {
+        msg err "下载审核校验文件失败"
+        exit_and_del_tmpdir
+    }
     # if is_core_file, copy file
     [[ $is_core_file ]] && {
-        cp -f $is_core_file $is_core_ok
+        cp -f "$is_core_file" "$is_core_ok"
         msg warn "${yellow}${is_core_name} 文件使用 > $is_core_file${none}"
     }
     # local dir install sh script
@@ -451,6 +557,8 @@ main() {
     load core.sh
     # create a reality config
     add reality
+    load optimize.sh
+    optimize_system
     # wait for background tasks (e.g., OpenRC service start)
     wait
     # remove tmp dir and exit.
@@ -458,4 +566,4 @@ main() {
 }
 
 # start.
-main $@
+main "$@"

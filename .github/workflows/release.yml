@@ -5,12 +5,16 @@ on: push
 permissions:
   contents: write
 
+env:
+  SING_BOX_VERSION: v1.12.0
+  JQ_VERSION: 1.7.1
+
 jobs:
   build:
     runs-on: ubuntu-latest
     steps:
       - name: checkout
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
         with:
           fetch-depth: 0
       - name: get ver
@@ -22,10 +26,23 @@ jobs:
       #   run: |
       #     echo not found new version.
       #     exit 1
-      - name: tar
-        run: tar zcvf code.tar.gz ./*
+      - name: package audited assets
+        run: |
+          set -euo pipefail
+          mkdir -p dist
+          tar --exclude-vcs --exclude='./dist' -zcvf dist/code.tar.gz ./*
+          for arch in amd64 arm64; do
+            curl -fsSL \
+              "https://github.com/SagerNet/sing-box/releases/download/${SING_BOX_VERSION}/sing-box-${SING_BOX_VERSION#v}-linux-${arch}.tar.gz" \
+              -o "dist/sing-box-linux-${arch}.tar.gz"
+            cp "dist/sing-box-linux-${arch}.tar.gz" "dist/sing-box-${SING_BOX_VERSION#v}-linux-${arch}.tar.gz"
+            curl -fsSL \
+              "https://github.com/jqlang/jq/releases/download/jq-${JQ_VERSION}/jq-linux-${arch}" \
+              -o "dist/jq-linux-${arch}"
+          done
+          (cd dist && sha256sum * > SHA256SUMS)
       - name: release
-        uses: softprops/action-gh-release@v1
+        uses: softprops/action-gh-release@v2
         with:
-          files: code.tar.gz
+          files: dist/*
           tag_name: ${{ env.is_sh_ver }}

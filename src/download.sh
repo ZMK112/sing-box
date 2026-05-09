@@ -13,7 +13,7 @@ get_latest_version() {
         url="https://api.github.com/repos/$is_caddy_repo/releases/latest?v=$RANDOM"
         ;;
     esac
-    latest_ver=$(_wget -qO- $url | grep tag_name | grep -E -o 'v([0-9.]+)')
+    latest_ver=$(_wget -qO- "$url" | grep tag_name | grep -E -o 'v([0-9.]+)')
     [[ ! $latest_ver ]] && {
         err "获取 ${name} 最新版本失败."
     }
@@ -23,11 +23,8 @@ download() {
     latest_ver=$2
     [[ ! $latest_ver ]] && get_latest_version $1
     # tmp dir
-    tmpdir=$(mktemp -u)
-    [[ ! $tmpdir ]] && {
-        tmpdir=/tmp/tmp-$RANDOM
-    }
-    mkdir -p $tmpdir
+    tmpdir=$(mktemp -d)
+    [[ ! $tmpdir ]] && err "创建临时目录失败."
     case $1 in
     core)
         name=$is_core_name

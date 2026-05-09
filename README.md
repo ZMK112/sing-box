@@ -45,6 +45,41 @@
 
 安装及使用：https://233boy.com/sing-box/sing-box-script/
 
+# 审核安装源
+
+默认安装源已切换为本仓库发布的审核资产：`ZMK112/sing-box` 的固定 release tag。
+
+安装脚本默认下载以下审核资产，并使用 `SHA256SUMS` 校验：
+
+- `code.tar.gz`
+- `sing-box-linux-amd64.tar.gz`
+- `sing-box-linux-arm64.tar.gz`
+- `jq-linux-amd64`
+- `jq-linux-arm64`
+
+如需本地审核后安装，可在仓库目录运行：
+
+```bash
+bash install.sh --local-install
+```
+
+如需临时使用上游 release，可显式指定：
+
+```bash
+bash install.sh --use-upstream
+```
+
+Debian/Ubuntu 等 `apt-get` 系统会默认安装 `fail2ban`。
+
+首次安装完成后会自动执行代理服务器优化：
+
+- 内存小于等于 2G 且未启用 swap 时，自动创建 2G `/swapfile`
+- 启用 BBR/fq
+- 写入代理服务器网络参数 `/etc/sysctl.d/99-sing-box-proxy.conf`
+- 写入文件描述符限制 `/etc/security/limits.d/99-sing-box.conf`
+- 添加 sing-box 日志轮转 `/etc/logrotate.d/sing-box`
+- systemd 环境下限制 journal 占用
+
 # 帮助
 
 使用：`sing-box help`

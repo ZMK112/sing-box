@@ -15,6 +15,10 @@ _try_enable_bbr() {
 	if [[ $_test1 -eq 4 && $_test2 -ge 9 ]] || [[ $_test1 -ge 5 ]]; then
 		_open_bbr
 	else
+		[[ $is_bbr_no_fail ]] && {
+			warn "当前内核不支持启用 BBR 优化, 已跳过."
+			return
+		}
 		err "不支持启用 BBR 优化."
 	fi
 }
