@@ -217,6 +217,7 @@ verify_sha256() {
         msg err "${name} SHA256 校验失败"
         return 1
     }
+    return 0
 }
 
 download() {
